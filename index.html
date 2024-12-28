@@ -1,0 +1,336 @@
+<!-- <!DOCTYPE html>
+<html>
+<head>
+    <title>WebAuthn Demo</title>
+</head>
+<body>
+    <h1>WebAuthn Registration</h1>
+    <input type="text" id="username" placeholder="Enter username">
+    <button onclick="startRegistration()">Register</button>
+
+    <script>
+        async function startRegistration() {
+            const username = document.getElementById('username').value;
+            if (!username) {
+                alert('Username is required');
+                return;
+            }
+
+            try {
+                console.log('Starting registration process for:', username);
+
+                // Step 2: Call /register/start to get publicKeyCredentialCreationOptions
+                const response = await fetch('http://localhost:3000/register/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch publicKeyCredentialCreationOptions');
+                }
+
+                const publicKeyCredentialCreationOptions = await response.json();
+                console.log('Received publicKeyCredentialCreationOptions:', publicKeyCredentialCreationOptions);
+
+                // Convert challenge from base64url to ArrayBuffer
+                publicKeyCredentialCreationOptions.challenge = Uint8Array.from(atob(publicKeyCredentialCreationOptions.challenge.replace(/_/g, '/').replace(/-/g, '+')), c => c.charCodeAt(0));
+
+                // Convert user.id from base64url to ArrayBuffer
+                publicKeyCredentialCreationOptions.user.id = Uint8Array.from(atob(publicKeyCredentialCreationOptions.user.id.replace(/_/g, '/').replace(/-/g, '+')), c => c.charCodeAt(0));
+
+                // Step 3: Use navigator.credentials.create() to create credentials
+                const credential = await navigator.credentials.create({ publicKey: publicKeyCredentialCreationOptions });
+                console.log('Created credential:', credential);
+
+                // Step 4: Send the result to /register/complete for server-side validation and storage
+                const completeResponse = await fetch('http://localhost:3000/register/complete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, credential })
+                });
+
+                if (completeResponse.ok) {
+                    alert('Registration successful');
+                } else {
+                    alert('Registration failed');
+                }
+            } catch (error) {
+                console.error('Error during registration:', error);
+                alert('Registration failed: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html> -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebAuthn Registration Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        .status.error {
+            background-color: #ffebee;
+            color: #c62828;
+            border: 1px solid #ffcdd2;
+        }
+
+        .status.success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #c8e6c9;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4CAF50;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebAuthn Registration</h1>
+        
+        <div class="form-group">
+            <label for="username">Username:</label>
+            <input type="text" id="username" placeholder="Enter your username" autocomplete="off">
+        </div>
+
+        <button onclick="startRegistration()" id="registerButton">Register Device</button>
+
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Processing registration...</p>
+        </div>
+
+        <div id="status" class="status" style="display: none;"></div>
+    </div>
+
+    <script>
+        // Utility function to show status messages
+        function showStatus(message, isError = false) {
+            const statusElement = document.getElementById('status');
+            statusElement.textContent = message;
+            statusElement.className = `status ${isError ? 'error' : 'success'}`;
+            statusElement.style.display = 'block';
+        }
+
+        // Utility function to toggle loading state
+        function setLoading(isLoading) {
+            const loadingElement = document.getElementById('loading');
+            const registerButton = document.getElementById('registerButton');
+            const usernameInput = document.getElementById('username');
+
+            loadingElement.style.display = isLoading ? 'block' : 'none';
+            registerButton.disabled = isLoading;
+            usernameInput.disabled = isLoading;
+        }
+
+        // Function to get device fingerprint
+        async function getDeviceFingerprint() {
+            const fpData = {
+                userAgent: navigator.userAgent,
+                language: navigator.language,
+                platform: navigator.platform,
+                screenResolution: `${screen.width}x${screen.height}`,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                colorDepth: screen.colorDepth,
+                deviceMemory: navigator.deviceMemory,
+                hardwareConcurrency: navigator.hardwareConcurrency,
+                availableScreenResolution: `${screen.availWidth}x${screen.availHeight}`
+            };
+            return btoa(JSON.stringify(fpData));
+        }
+
+        // Function to encode array buffer to base64
+        function arrayBufferToBase64(buffer) {
+            const binary = String.fromCharCode.apply(null, new Uint8Array(buffer));
+            return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+        }
+
+        // Function to prepare credential for JSON serialization
+        function prepareCredentialForJson(credential) {
+            return {
+                id: credential.id,
+                type: credential.type,
+                rawId: arrayBufferToBase64(credential.rawId),
+                response: {
+                    attestationObject: arrayBufferToBase64(credential.response.attestationObject),
+                    clientDataJSON: arrayBufferToBase64(credential.response.clientDataJSON)
+                }
+            };
+        }
+
+        // Main registration function
+        async function startRegistration() {
+            const username = document.getElementById('username').value.trim();
+            
+            if (!username) {
+                showStatus('Username is required', true);
+                return;
+            }
+
+            // Check if WebAuthn is supported
+            if (!window.PublicKeyCredential) {
+                showStatus('WebAuthn is not supported in this browser.', true);
+                return;
+            }
+
+            setLoading(true);
+            
+            try {
+                // Get device fingerprint
+                const fingerprint = await getDeviceFingerprint();
+
+                // Start registration process
+                const startResponse = await fetch('http://localhost:3000/register/start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Device-Fingerprint': fingerprint
+                    },
+                    body: JSON.stringify({ username })
+                });
+
+                if (!startResponse.ok) {
+                    const error = await startResponse.json();
+                    throw new Error(error.error || 'Failed to start registration');
+                }
+
+                const options = await startResponse.json();
+
+                // Convert base64URL challenge to ArrayBuffer
+                options.challenge = Uint8Array.from(
+                    atob(options.challenge.replace(/_/g, '/').replace(/-/g, '+')), 
+                    c => c.charCodeAt(0)
+                );
+
+                // Convert user ID to ArrayBuffer
+                options.user.id = Uint8Array.from(
+                    atob(options.user.id.replace(/_/g, '/').replace(/-/g, '+')), 
+                    c => c.charCodeAt(0)
+                );
+
+                // Create credentials
+                const credential = await navigator.credentials.create({
+                    publicKey: options
+                });
+
+                // Prepare credential for sending to server
+                const credentialForJson = prepareCredentialForJson(credential);
+
+                // Complete registration
+                const completeResponse = await fetch('http://localhost:3000/register/complete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Device-Fingerprint': fingerprint
+                    },
+                    body: JSON.stringify({
+                        username,
+                        credential: credentialForJson
+                    })
+                });
+
+                if (!completeResponse.ok) {
+                    const error = await completeResponse.json();
+                    throw new Error(error.error || 'Failed to complete registration');
+                }
+
+                showStatus('Registration successful! Your device has been registered.');
+                document.getElementById('username').value = '';
+
+            } catch (error) {
+                console.error('Registration error:', error);
+                showStatus(error.message || 'Registration failed. Please try again.', true);
+            } finally {
+                setLoading(false);
+            }
+        }
+    </script>
+</body>
+</html>
